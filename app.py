@@ -207,40 +207,35 @@ if file:
 
     today = pd.Timestamp('2026-05-07')
 
-    # "Days ago" column
     df['DAYS_AGO'] = (today - df['DATE']).dt.days
 
-    # Base filter: conversion >= 1 only (date threshold is now a checkbox)
+    # Base filter: only rows with conversion >= 1
     filtered_conversion_data = df[df['CONVERSION'] >= 1].copy()
 
-    # Find max date per DATA+OFFER pair across full df
+    # ── Last Converted logic (always uses FULL df) ───────────────────────────
+    # Find the true latest date per DATA+OFFER pair across ALL rows (incl. 0s)
     max_dates = df.groupby(['DATA', 'OFFER'])['DATE'].max().reset_index()
     latest = pd.merge(df, max_dates, on=['DATA', 'OFFER', 'DATE'])
 
-    # Pairs where latest row has conversion >= 1  →  "last converted = YES"
+    # A pair is "Last Converted" only if its single latest row has conversion >= 1
     last_converted_pairs = set(
         latest[latest['CONVERSION'] >= 1][['DATA', 'OFFER']]
         .drop_duplicates()
         .itertuples(index=False, name=None)
     )
 
-    # Add last-converted flag to filtered data
+    # Tag every converted row — NO pre-filtering by this flag
     filtered_conversion_data['LAST_CONVERTED'] = (
         filtered_conversion_data[['DATA', 'OFFER']]
         .apply(tuple, axis=1)
         .isin(last_converted_pairs)
     )
 
-    keep_pairs = list(last_converted_pairs)
-    final_filtered = filtered_conversion_data[
-        filtered_conversion_data[['DATA', 'OFFER']].apply(tuple, axis=1).isin(keep_pairs)
-    ]
-
-    # ── Metrics row ──────────────────────────────────────────────────────────
-    total_rows = len(final_filtered)
-    unique_offers = final_filtered['OFFER'].nunique() if not final_filtered.empty else 0
-    last_conv_count = int(final_filtered['LAST_CONVERTED'].sum()) if not final_filtered.empty else 0
-    avg_days = round(final_filtered['DAYS_AGO'].mean(), 1) if not final_filtered.empty else "—"
+    # ── Metrics (based on full converted data, before UI filters) ────────────
+    total_rows = len(filtered_conversion_data)
+    unique_offers = filtered_conversion_data['OFFER'].nunique() if not filtered_conversion_data.empty else 0
+    last_conv_count = int(filtered_conversion_data['LAST_CONVERTED'].sum()) if not filtered_conversion_data.empty else 0
+    avg_days = round(filtered_conversion_data['DAYS_AGO'].mean(), 1) if not filtered_conversion_data.empty else "—"
 
     st.markdown(f"""
     <div class="metric-row">
@@ -296,18 +291,18 @@ if file:
         only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
 
     # ── Apply filters ─────────────────────────────────────────────────────────
-    display_df = final_filtered.copy()
+    display_df = filtered_conversion_data.copy()
 
-    # Exclude last N days filter
+    # Exclude last N days
     if exclude_days is not None:
         date_threshold = today - pd.Timedelta(days=int(exclude_days))
         display_df = display_df[display_df['DATE'] <= date_threshold]
 
-    # Last N days filter
+    # Show only last N days
     if days_filter is not None:
         display_df = display_df[display_df['DAYS_AGO'] <= int(days_filter)]
 
-    # Last converted filter
+    # Last Converted Only — now actually filters since base data is no longer pre-filtered
     if only_last_converted:
         display_df = display_df[display_df['LAST_CONVERTED'] == True]
 
