@@ -38,7 +38,6 @@ html, body, [data-testid="stAppViewContainer"] {
     border-right: 1px solid var(--border);
 }
 
-/* Header */
 .app-header {
     display: flex;
     align-items: center;
@@ -65,7 +64,6 @@ html, body, [data-testid="stAppViewContainer"] {
     margin: 0;
 }
 
-/* Cards */
 .metric-row {
     display: flex;
     gap: 14px;
@@ -102,7 +100,6 @@ html, body, [data-testid="stAppViewContainer"] {
     color: var(--accent);
 }
 
-/* Offer tag */
 .offer-block {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -143,7 +140,6 @@ html, body, [data-testid="stAppViewContainer"] {
     font-weight: 600;
 }
 
-/* Streamlit overrides */
 div[data-testid="stFileUploader"] {
     background: var(--surface) !important;
     border: 1.5px dashed var(--border) !important;
@@ -167,9 +163,6 @@ div[data-testid="stTextInput"] input:focus {
     color: var(--text) !important;
     font-size: 13px !important;
 }
-.stCheckbox [data-testid="stCheckbox"] span {
-    background: var(--accent) !important;
-}
 div[data-testid="stDataFrame"] {
     border: 1px solid var(--border) !important;
     border-radius: 8px !important;
@@ -190,21 +183,14 @@ label[data-testid="stWidgetLabel"] p {
     text-transform: uppercase !important;
     font-family: 'Space Mono', monospace !important;
 }
-.stSubheader {
-    color: var(--text) !important;
-}
-h3 {
-    color: var(--text) !important;
-}
+h3 { color: var(--text) !important; }
 </style>
 """, unsafe_allow_html=True)
 
 # ── Header ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="app-header">
-    <div>
-        <div class="badge">ANALYTICS</div>
-    </div>
+    <div><div class="badge">ANALYTICS</div></div>
     <h1>🎯 Offer Filter Dashboard</h1>
 </div>
 """, unsafe_allow_html=True)
@@ -220,15 +206,12 @@ if file:
     df['CONVERSION'] = pd.to_numeric(df['CONVERSION'], errors='coerce')
 
     today = pd.Timestamp('2026-05-07')
-    date_threshold = today - pd.Timedelta(days=10)
 
     # "Days ago" column
     df['DAYS_AGO'] = (today - df['DATE']).dt.days
 
-    filtered_conversion_data = df[
-        (df['CONVERSION'] >= 1) &
-        (df['DATE'] <= date_threshold)
-    ].copy()
+    # Base filter: conversion >= 1 only (date threshold is now a checkbox)
+    filtered_conversion_data = df[df['CONVERSION'] >= 1].copy()
 
     # Find max date per DATA+OFFER pair across full df
     max_dates = df.groupby(['DATA', 'OFFER'])['DATE'].max().reset_index()
@@ -256,7 +239,7 @@ if file:
     # ── Metrics row ──────────────────────────────────────────────────────────
     total_rows = len(final_filtered)
     unique_offers = final_filtered['OFFER'].nunique() if not final_filtered.empty else 0
-    last_conv_count = final_filtered['LAST_CONVERTED'].sum() if not final_filtered.empty else 0
+    last_conv_count = int(final_filtered['LAST_CONVERTED'].sum()) if not final_filtered.empty else 0
     avg_days = round(final_filtered['DAYS_AGO'].mean(), 1) if not final_filtered.empty else "—"
 
     st.markdown(f"""
@@ -283,7 +266,7 @@ if file:
     st.divider()
 
     # ── Filter controls ───────────────────────────────────────────────────────
-    col1, col2, col3 = st.columns([3, 1, 1])
+    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
     with col1:
         offer_input = st.text_input(
             "Search offers (partial name, comma-separated)",
@@ -297,34 +280,56 @@ if file:
             value=None,
             step=1,
             placeholder="e.g. 5",
-            help="Show only rows where conversion happened within the last N days"
+            help="Show only rows where DAYS_AGO <= N"
         )
     with col3:
+        apply_10day = st.checkbox(
+            "📅 Exclude last 10 days",
+            value=False,
+            help="When ON: only show conversions older than 10 days (DATE <= today − 10)"
+        )
+    with col4:
         only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
 
     # ── Apply filters ─────────────────────────────────────────────────────────
     display_df = final_filtered.copy()
 
-    # Days filter: keep rows where DAYS_AGO <= N
+    # 10-day threshold checkbox
+    if apply_10day:
+        date_threshold = today - pd.Timedelta(days=10)
+        display_df = display_df[display_df['DATE'] <= date_threshold]
+
+    # Last N days filter
     if days_filter is not None:
         display_df = display_df[display_df['DAYS_AGO'] <= int(days_filter)]
 
+    # Last converted filter
     if only_last_converted:
         display_df = display_df[display_df['LAST_CONVERTED'] == True]
 
-    # ── Column order: put DAYS_AGO + LAST_CONVERTED early ────────────────────
+    # ── Column order ──────────────────────────────────────────────────────────
     def style_df(df_in):
         cols = list(df_in.columns)
         priority = ['OFFER', 'DATA', 'DATE', 'DAYS_AGO', 'CONVERSION', 'LAST_CONVERTED']
         ordered = [c for c in priority if c in cols] + [c for c in cols if c not in priority]
         return df_in[ordered]
 
+    col_config = {
+        "DAYS_AGO": st.column_config.NumberColumn(
+            "Days Ago",
+            help="How many days before today the conversion happened",
+            format="%d days",
+        ),
+        "DATE": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
+        "LAST_CONVERTED": st.column_config.CheckboxColumn("Last Conv?"),
+        "CONVERSION": st.column_config.NumberColumn("Conversion", format="%.0f"),
+    }
+
     # ── Results ───────────────────────────────────────────────────────────────
     if offer_input:
         search_terms = [x.strip().lower() for x in offer_input.split(",") if x.strip()]
 
         for term in search_terms:
-            # Partial / fuzzy match: offer name contains the search term
             matched = display_df[display_df['OFFER'].str.lower().str.contains(term, na=False)]
             matched_offers = matched['OFFER'].unique()
 
@@ -356,43 +361,15 @@ if file:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    styled = style_df(offer_rows)
-                    st.dataframe(
-                        styled,
-                        use_container_width=True,
-                        hide_index=True,
-                        column_config={
-                            "DAYS_AGO": st.column_config.NumberColumn(
-                                "Days Ago",
-                                help="How many days before today the conversion happened",
-                                format="%d days",
-                            ),
-                            "DATE": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
-                            "LAST_CONVERTED": st.column_config.CheckboxColumn("Last Conv?"),
-                            "CONVERSION": st.column_config.NumberColumn("Conversion", format="%.0f"),
-                        }
-                    )
+                    st.dataframe(style_df(offer_rows), use_container_width=True,
+                                 hide_index=True, column_config=col_config)
     else:
         st.subheader("All Filtered Data")
         if display_df.empty:
             st.info("No data matches the current filters.")
         else:
-            styled = style_df(display_df)
-            st.dataframe(
-                styled,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "DAYS_AGO": st.column_config.NumberColumn(
-                        "Days Ago",
-                        help="How many days before today the conversion happened",
-                        format="%d days",
-                    ),
-                    "DATE": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
-                    "LAST_CONVERTED": st.column_config.CheckboxColumn("Last Conv?"),
-                    "CONVERSION": st.column_config.NumberColumn("Conversion", format="%.0f"),
-                }
-            )
+            st.dataframe(style_df(display_df), use_container_width=True,
+                         hide_index=True, column_config=col_config)
 else:
     st.markdown("""
     <div style="text-align:center; padding: 60px 20px; color: #6b7280;">
