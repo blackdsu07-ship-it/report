@@ -199,7 +199,7 @@ st.markdown("""
 file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if file:
-    # Handle potential encoding issues (UnicodeDecodeError)
+    # Handle potential encoding issues
     df = None
     for encoding in ['utf-8', 'latin1', 'cp1252', 'utf-16']:
         try:
@@ -210,16 +210,19 @@ if file:
             continue
     
     if df is None:
-        st.error("Could not decode the CSV file. Please ensure it is a valid CSV format.")
+        st.error("Could not decode the CSV file. Please check the file format.")
     else:
         # ── Data processing ──────────────────────────────────────────────────────
         df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce', dayfirst=True)
         df['CONVERSION'] = pd.to_numeric(df['CONVERSION'], errors='coerce')
 
-        today = pd.Timestamp('2026-05-07')
+        # DYNAMIC CURRENT DATE
+        today = pd.Timestamp.now().normalize()
+        
+        # Calculate Days Ago (ensuring 0 or positive)
         df['DAYS_AGO'] = (today - df['DATE']).dt.days
 
-        # Base filter: only rows with conversion >= 1
+        # Filter: only rows with conversion >= 1
         filtered_conversion_data = df[df['CONVERSION'] >= 1].copy()
 
         # ── Last Converted logic ────────────────────────────────────────────────
@@ -247,6 +250,10 @@ if file:
         st.markdown(f"""
         <div class="metric-row">
             <div class="metric-card">
+                <div class="metric-label">Today</div>
+                <div class="metric-value" style="font-size: 18px;">{today.strftime('%d %b %Y')}</div>
+            </div>
+            <div class="metric-card">
                 <div class="metric-label">Total Rows</div>
                 <div class="metric-value">{total_rows}</div>
             </div>
@@ -258,10 +265,6 @@ if file:
                 <div class="metric-label">Last Converted</div>
                 <div class="metric-value">{last_conv_count}</div>
             </div>
-            <div class="metric-card">
-                <div class="metric-label">Avg Days Ago</div>
-                <div class="metric-value">{avg_days}</div>
-            </div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -270,22 +273,11 @@ if file:
         # ── Filter controls ───────────────────────────────────────────────────────
         col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
         with col1:
-            offer_input = st.text_input(
-                "Search offers (partial name, comma-separated)",
-                placeholder="e.g. summer, promo2024"
-            )
+            offer_input = st.text_input("Search offers (comma-separated)", placeholder="e.g. summer, promo")
         with col2:
-            days_filter = st.number_input(
-                "Last N days",
-                min_value=1, max_value=365, value=None, step=1,
-                placeholder="e.g. 5"
-            )
+            days_filter = st.number_input("Last N days", min_value=1, value=None, step=1)
         with col3:
-            exclude_days = st.number_input(
-                "Exclude last N days",
-                min_value=1, max_value=365, value=None, step=1,
-                placeholder="e.g. 10"
-            )
+            exclude_days = st.number_input("Exclude last N days", min_value=1, value=None, step=1)
         with col4:
             only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
 
@@ -324,10 +316,7 @@ if file:
 
                 st.markdown(f"""
                 <div class="offer-block">
-                    <div class="offer-title">
-                        🔍 "{term}"
-                        <span class="match-badge">{len(matched_offers)} matches</span>
-                    </div>
+                    <div class="offer-title">🔍 "{term}" <span class="match-badge">{len(matched_offers)} matches</span></div>
                 </div>
                 """, unsafe_allow_html=True)
 
