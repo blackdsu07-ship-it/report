@@ -283,10 +283,14 @@ if file:
             help="Show only rows where DAYS_AGO <= N"
         )
     with col3:
-        apply_10day = st.checkbox(
-            "📅 Exclude last 10 days",
-            value=False,
-            help="When ON: only show conversions older than 10 days (DATE <= today − 10)"
+        exclude_days = st.number_input(
+            "Exclude last N days",
+            min_value=1,
+            max_value=365,
+            value=None,
+            step=1,
+            placeholder="e.g. 10",
+            help="Exclude rows from the most recent N days (DATE <= today − N)"
         )
     with col4:
         only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
@@ -294,9 +298,9 @@ if file:
     # ── Apply filters ─────────────────────────────────────────────────────────
     display_df = final_filtered.copy()
 
-    # 10-day threshold checkbox
-    if apply_10day:
-        date_threshold = today - pd.Timedelta(days=10)
+    # Exclude last N days filter
+    if exclude_days is not None:
+        date_threshold = today - pd.Timedelta(days=int(exclude_days))
         display_df = display_df[display_df['DATE'] <= date_threshold]
 
     # Last N days filter
