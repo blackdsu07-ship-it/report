@@ -283,17 +283,32 @@ if file:
     st.divider()
 
     # ── Filter controls ───────────────────────────────────────────────────────
-    col1, col2 = st.columns([3, 1])
+    col1, col2, col3 = st.columns([3, 1, 1])
     with col1:
         offer_input = st.text_input(
             "Search offers (partial name, comma-separated)",
             placeholder="e.g.  summer, promo2024, deal"
         )
     with col2:
+        days_filter = st.number_input(
+            "Last N days",
+            min_value=1,
+            max_value=365,
+            value=None,
+            step=1,
+            placeholder="e.g. 5",
+            help="Show only rows where conversion happened within the last N days"
+        )
+    with col3:
         only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
 
-    # ── Apply last-converted filter ───────────────────────────────────────────
+    # ── Apply filters ─────────────────────────────────────────────────────────
     display_df = final_filtered.copy()
+
+    # Days filter: keep rows where DAYS_AGO <= N
+    if days_filter is not None:
+        display_df = display_df[display_df['DAYS_AGO'] <= int(days_filter)]
+
     if only_last_converted:
         display_df = display_df[display_df['LAST_CONVERTED'] == True]
 
