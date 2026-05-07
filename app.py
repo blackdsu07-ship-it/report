@@ -199,176 +199,158 @@ st.markdown("""
 file = st.file_uploader("Upload your CSV file", type=["csv"])
 
 if file:
-    df = pd.read_csv(file)
-
-    # ── Data processing ──────────────────────────────────────────────────────
-    df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce', dayfirst=True)
-    df['CONVERSION'] = pd.to_numeric(df['CONVERSION'], errors='coerce')
-
-    today = pd.Timestamp('2026-05-07')
-
-    df['DAYS_AGO'] = (today - df['DATE']).dt.days
-
-    # Base filter: only rows with conversion >= 1
-    filtered_conversion_data = df[df['CONVERSION'] >= 1].copy()
-
-    # ── Last Converted logic (always uses FULL df) ───────────────────────────
-    # Find the true latest date per DATA+OFFER pair across ALL rows (incl. 0s)
-    max_dates = df.groupby(['DATA', 'OFFER'])['DATE'].max().reset_index()
-    latest = pd.merge(df, max_dates, on=['DATA', 'OFFER', 'DATE'])
-
-    # A pair is "Last Converted" only if its single latest row has conversion >= 1
-    last_converted_pairs = set(
-        latest[latest['CONVERSION'] >= 1][['DATA', 'OFFER']]
-        .drop_duplicates()
-        .itertuples(index=False, name=None)
-    )
-
-    # Tag every converted row — NO pre-filtering by this flag
-    filtered_conversion_data['LAST_CONVERTED'] = (
-        filtered_conversion_data[['DATA', 'OFFER']]
-        .apply(tuple, axis=1)
-        .isin(last_converted_pairs)
-    )
-
-    # ── Metrics (based on full converted data, before UI filters) ────────────
-    total_rows = len(filtered_conversion_data)
-    unique_offers = filtered_conversion_data['OFFER'].nunique() if not filtered_conversion_data.empty else 0
-    last_conv_count = int(filtered_conversion_data['LAST_CONVERTED'].sum()) if not filtered_conversion_data.empty else 0
-    avg_days = round(filtered_conversion_data['DAYS_AGO'].mean(), 1) if not filtered_conversion_data.empty else "—"
-
-    st.markdown(f"""
-    <div class="metric-row">
-        <div class="metric-card">
-            <div class="metric-label">Total Rows</div>
-            <div class="metric-value">{total_rows}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Unique Offers</div>
-            <div class="metric-value">{unique_offers}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Last Converted</div>
-            <div class="metric-value">{last_conv_count}</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-label">Avg Days Ago</div>
-            <div class="metric-value">{avg_days}</div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── Filter controls ───────────────────────────────────────────────────────
-    col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-    with col1:
-        offer_input = st.text_input(
-            "Search offers (partial name, comma-separated)",
-            placeholder="e.g.  summer, promo2024, deal"
-        )
-    with col2:
-        days_filter = st.number_input(
-            "Last N days",
-            min_value=1,
-            max_value=365,
-            value=None,
-            step=1,
-            placeholder="e.g. 5",
-            help="Show only rows where DAYS_AGO <= N"
-        )
-    with col3:
-        exclude_days = st.number_input(
-            "Exclude last N days",
-            min_value=1,
-            max_value=365,
-            value=None,
-            step=1,
-            placeholder="e.g. 10",
-            help="Exclude rows from the most recent N days (DATE <= today − N)"
-        )
-    with col4:
-        only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
-
-    # ── Apply filters ─────────────────────────────────────────────────────────
-    display_df = filtered_conversion_data.copy()
-
-    # Exclude last N days
-    if exclude_days is not None:
-        date_threshold = today - pd.Timedelta(days=int(exclude_days))
-        display_df = display_df[display_df['DATE'] <= date_threshold]
-
-    # Show only last N days
-    if days_filter is not None:
-        display_df = display_df[display_df['DAYS_AGO'] <= int(days_filter)]
-
-    # Last Converted Only — now actually filters since base data is no longer pre-filtered
-    if only_last_converted:
-        display_df = display_df[display_df['LAST_CONVERTED'] == True]
-
-    # ── Column order ──────────────────────────────────────────────────────────
-    def style_df(df_in):
-        cols = list(df_in.columns)
-        priority = ['OFFER', 'DATA', 'DATE', 'DAYS_AGO', 'CONVERSION', 'LAST_CONVERTED']
-        ordered = [c for c in priority if c in cols] + [c for c in cols if c not in priority]
-        return df_in[ordered]
-
-    col_config = {
-        "DAYS_AGO": st.column_config.NumberColumn(
-            "Days Ago",
-            help="How many days before today the conversion happened",
-            format="%d days",
-        ),
-        "DATE": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
-        "LAST_CONVERTED": st.column_config.CheckboxColumn("Last Conv?"),
-        "CONVERSION": st.column_config.NumberColumn("Conversion", format="%.0f"),
-    }
-
-    # ── Results ───────────────────────────────────────────────────────────────
-    if offer_input:
-        search_terms = [x.strip().lower() for x in offer_input.split(",") if x.strip()]
-
-        for term in search_terms:
-            matched = display_df[display_df['OFFER'].str.lower().str.contains(term, na=False)]
-            matched_offers = matched['OFFER'].unique()
-
-            st.markdown(f"""
-            <div class="offer-block">
-                <div class="offer-title">
-                    🔍 "{term}"
-                    <span class="match-badge">{len(matched_offers)} match{'es' if len(matched_offers) != 1 else ''}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            if matched.empty:
-                st.markdown('<p class="no-data">No results found for this search term.</p>', unsafe_allow_html=True)
-            else:
-                for offer_name in matched_offers:
-                    offer_rows = matched[matched['OFFER'] == offer_name]
-                    is_last = offer_rows['LAST_CONVERTED'].iloc[0]
-
-                    badge_html = (
-                        '<span class="last-conv-yes">● Last Converted</span>'
-                        if is_last else
-                        '<span class="last-conv-no">○ Not Last Converted</span>'
-                    )
-
-                    st.markdown(f"""
-                    <div style="margin: 10px 0 4px; font-size:13px; font-family:'Space Mono',monospace;">
-                        <strong style="color:#e8eaf0">{offer_name}</strong>&nbsp;&nbsp;{badge_html}
-                    </div>
-                    """, unsafe_allow_html=True)
-
-                    st.dataframe(style_df(offer_rows), use_container_width=True,
-                                 hide_index=True, column_config=col_config)
+    # Handle potential encoding issues (UnicodeDecodeError)
+    df = None
+    for encoding in ['utf-8', 'latin1', 'cp1252', 'utf-16']:
+        try:
+            file.seek(0)
+            df = pd.read_csv(file, encoding=encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    
+    if df is None:
+        st.error("Could not decode the CSV file. Please ensure it is a valid CSV format.")
     else:
-        st.subheader("All Filtered Data")
-        if display_df.empty:
-            st.info("No data matches the current filters.")
+        # ── Data processing ──────────────────────────────────────────────────────
+        df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce', dayfirst=True)
+        df['CONVERSION'] = pd.to_numeric(df['CONVERSION'], errors='coerce')
+
+        today = pd.Timestamp('2026-05-07')
+        df['DAYS_AGO'] = (today - df['DATE']).dt.days
+
+        # Base filter: only rows with conversion >= 1
+        filtered_conversion_data = df[df['CONVERSION'] >= 1].copy()
+
+        # ── Last Converted logic ────────────────────────────────────────────────
+        max_dates = df.groupby(['DATA', 'OFFER'])['DATE'].max().reset_index()
+        latest = pd.merge(df, max_dates, on=['DATA', 'OFFER', 'DATE'])
+
+        last_converted_pairs = set(
+            latest[latest['CONVERSION'] >= 1][['DATA', 'OFFER']]
+            .drop_duplicates()
+            .itertuples(index=False, name=None)
+        )
+
+        filtered_conversion_data['LAST_CONVERTED'] = (
+            filtered_conversion_data[['DATA', 'OFFER']]
+            .apply(tuple, axis=1)
+            .isin(last_converted_pairs)
+        )
+
+        # ── Metrics ─────────────────────────────────────────────────────────────
+        total_rows = len(filtered_conversion_data)
+        unique_offers = filtered_conversion_data['OFFER'].nunique() if not filtered_conversion_data.empty else 0
+        last_conv_count = int(filtered_conversion_data['LAST_CONVERTED'].sum()) if not filtered_conversion_data.empty else 0
+        avg_days = round(filtered_conversion_data['DAYS_AGO'].mean(), 1) if not filtered_conversion_data.empty else "—"
+
+        st.markdown(f"""
+        <div class="metric-row">
+            <div class="metric-card">
+                <div class="metric-label">Total Rows</div>
+                <div class="metric-value">{total_rows}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Unique Offers</div>
+                <div class="metric-value">{unique_offers}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Last Converted</div>
+                <div class="metric-value">{last_conv_count}</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Avg Days Ago</div>
+                <div class="metric-value">{avg_days}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.divider()
+
+        # ── Filter controls ───────────────────────────────────────────────────────
+        col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+        with col1:
+            offer_input = st.text_input(
+                "Search offers (partial name, comma-separated)",
+                placeholder="e.g. summer, promo2024"
+            )
+        with col2:
+            days_filter = st.number_input(
+                "Last N days",
+                min_value=1, max_value=365, value=None, step=1,
+                placeholder="e.g. 5"
+            )
+        with col3:
+            exclude_days = st.number_input(
+                "Exclude last N days",
+                min_value=1, max_value=365, value=None, step=1,
+                placeholder="e.g. 10"
+            )
+        with col4:
+            only_last_converted = st.checkbox("✅ Last Converted Only", value=False)
+
+        # ── Apply filters ─────────────────────────────────────────────────────────
+        display_df = filtered_conversion_data.copy()
+
+        if exclude_days is not None:
+            date_threshold = today - pd.Timedelta(days=int(exclude_days))
+            display_df = display_df[display_df['DATE'] <= date_threshold]
+
+        if days_filter is not None:
+            display_df = display_df[display_df['DAYS_AGO'] <= int(days_filter)]
+
+        if only_last_converted:
+            display_df = display_df[display_df['LAST_CONVERTED'] == True]
+
+        # ── Table Display Logic ───────────────────────────────────────────────────
+        def style_df(df_in):
+            cols = list(df_in.columns)
+            priority = ['OFFER', 'DATA', 'DATE', 'DAYS_AGO', 'CONVERSION', 'LAST_CONVERTED']
+            ordered = [c for c in priority if c in cols] + [c for c in cols if c not in priority]
+            return df_in[ordered]
+
+        col_config = {
+            "DAYS_AGO": st.column_config.NumberColumn("Days Ago", format="%d days"),
+            "DATE": st.column_config.DateColumn("Date", format="DD MMM YYYY"),
+            "LAST_CONVERTED": st.column_config.CheckboxColumn("Last Conv?"),
+            "CONVERSION": st.column_config.NumberColumn("Conversion", format="%.0f"),
+        }
+
+        if offer_input:
+            search_terms = [x.strip().lower() for x in offer_input.split(",") if x.strip()]
+            for term in search_terms:
+                matched = display_df[display_df['OFFER'].str.lower().str.contains(term, na=False)]
+                matched_offers = matched['OFFER'].unique()
+
+                st.markdown(f"""
+                <div class="offer-block">
+                    <div class="offer-title">
+                        🔍 "{term}"
+                        <span class="match-badge">{len(matched_offers)} matches</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                if matched.empty:
+                    st.markdown('<p class="no-data">No results found.</p>', unsafe_allow_html=True)
+                else:
+                    for offer_name in matched_offers:
+                        offer_rows = matched[matched['OFFER'] == offer_name]
+                        is_last = offer_rows['LAST_CONVERTED'].iloc[0]
+                        badge_html = '<span class="last-conv-yes">● Last Converted</span>' if is_last else '<span class="last-conv-no">○ Not Last Converted</span>'
+
+                        st.markdown(f"""
+                        <div style="margin: 10px 0 4px; font-size:13px; font-family:'Space Mono',monospace;">
+                            <strong style="color:#e8eaf0">{offer_name}</strong>&nbsp;&nbsp;{badge_html}
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.dataframe(style_df(offer_rows), use_container_width=True, hide_index=True, column_config=col_config)
         else:
-            st.dataframe(style_df(display_df), use_container_width=True,
-                         hide_index=True, column_config=col_config)
+            st.subheader("All Filtered Data")
+            if display_df.empty:
+                st.info("No data matches the current filters.")
+            else:
+                st.dataframe(style_df(display_df), use_container_width=True, hide_index=True, column_config=col_config)
 else:
     st.markdown("""
     <div style="text-align:center; padding: 60px 20px; color: #6b7280;">
