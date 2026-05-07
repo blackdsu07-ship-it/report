@@ -4,7 +4,7 @@ from datetime import datetime
 import os
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-CSV_FILE_PATH = "data.csv"  # <--- Change this to your actual filename
+CSV_FILE_PATH = "email_report2.csv"  # <--- Change this to your actual filename
 
 st.set_page_config(
     page_title="Offer Filter Pro",
